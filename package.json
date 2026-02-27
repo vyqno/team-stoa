@@ -1,0 +1,26 @@
+{
+  "name": "stoa",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "turbo build",
+    "dev": "turbo dev",
+    "lint": "turbo lint",
+    "typecheck": "turbo typecheck",
+    "seed": "tsx scripts/seed-services.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^25.3.1",
+    "eslint": "^10.0.2",
+    "tsx": "^4.21.0",
+    "turbo": "^2.4.0",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.56.1"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "dependencies": {
+    "zod": "^4.3.6"
+  }
+}
