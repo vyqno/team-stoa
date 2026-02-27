@@ -1,0 +1,36 @@
+{
+  "name": "@stoa/server",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.9",
+    "@huggingface/inference": "^4.13.13",
+    "@stoa/db": "workspace:*",
+    "@stoa/shared": "workspace:*",
+    "@x402/core": "^2.5.0",
+    "@x402/evm": "^2.5.0",
+    "@x402/hono": "^2.5.0",
+    "@coinbase/agentkit": "^0.2.0",
+    "@supabase/supabase-js": "^2.49.0",
+    "bcrypt": "^6.0.0",
+    "viem": "^2.23.0",
+    "dotenv": "^17.3.1",
+    "hono": "^4.12.3",
+    "jsonwebtoken": "^9.0.3",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/bcrypt": "^6.0.0",
+    "@types/jsonwebtoken": "^9.0.10",
+    "typescript": "^5.7.0"
+  }
+}
