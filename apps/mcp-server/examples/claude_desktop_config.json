@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "stoa": {
+      "command": "npx",
+      "args": ["@stoa/mcp-server"],
+      "env": {
+        "STOA_API_KEY": "YOUR_STOA_API_KEY",
+        "STOA_API_URL": "http://localhost:3001"
+      }
+    }
+  }
+}
