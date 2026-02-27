@@ -15,17 +15,20 @@ const { walletRouter } = await import("./routes/wallet.js");
 const { callRouter } = await import("./routes/call.js");
 const { providersRouter } = await import("./routes/providers.js");
 const { activityRouter } = await import("./routes/activity.js");
+const { topupRouter } = await import("./routes/topup.js");
 const { initializeFacilitator } = await import("./lib/facilitator.js");
-
 const app = new Hono();
 
 app.use("*", cors());
 
 app.get("/health", (c) => c.json({ status: "ok", timestamp: new Date().toISOString() }));
 
+// NOTE: rate limiting disabled in dev — enable in production with Redis-backed limiter
+// Route order matters: more specific routes first
+app.route("/api/wallet/topup", topupRouter);
+app.route("/api/wallet", walletRouter);
 app.route("/api/services", servicesRouter);
 app.route("/api/auth", authRouter);
-app.route("/api/wallet", walletRouter);
 app.route("/api/providers", providersRouter);
 app.route("/api/activity", activityRouter);
 app.route("/v1/call", callRouter);

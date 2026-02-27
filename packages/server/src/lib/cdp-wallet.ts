@@ -8,9 +8,9 @@ const USDC_ABI = parseAbi([
   "function balanceOf(address account) view returns (uint256)",
 ]);
 
-// Cooldown: don't retry wallet creation for 60s after a failure
+// Cooldown: don't retry wallet creation for 5s after a failure
 let lastFailure = 0;
-const COOLDOWN_MS = 60_000;
+const COOLDOWN_MS = 5_000;
 
 export async function createCdpWallet(_userId: string): Promise<{
   address: string;

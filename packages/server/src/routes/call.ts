@@ -1,11 +1,31 @@
 import { Hono } from "hono";
+import { createHash } from "node:crypto";
 import { UUID_REGEX } from "@stoa/shared";
-import { getServiceById, logCall, updateServiceMetrics } from "@stoa/db";
+import { getServiceById, logCall, updateServiceMetrics, getUserByApiKey } from "@stoa/db";
 import { resourceServer, X402_NETWORK } from "../lib/facilitator.js";
 
 const PROVIDER_WALLET = process.env.PROVIDER_WALLET_ADDRESS || "0x0000000000000000000000000000000000000000";
 
 export const callRouter = new Hono();
+
+// Helper: call the upstream provider and return response
+async function callProvider(
+  endpointUrl: string,
+  body: string,
+  timeoutMs = 60000,
+): Promise<Response> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const isHF = endpointUrl.includes("huggingface.co") || endpointUrl.includes("hf.space");
+  if (isHF && process.env.HF_TOKEN) {
+    headers["Authorization"] = `Bearer ${process.env.HF_TOKEN}`;
+  }
+  return fetch(endpointUrl, {
+    method: "POST",
+    headers,
+    body,
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+}
 
 // POST /v1/call/:serviceId — x402 proxy
 callRouter.post("/:serviceId", async (c) => {
@@ -19,27 +39,18 @@ callRouter.post("/:serviceId", async (c) => {
     return c.json({ error: "Service not found or inactive" }, 404);
   }
 
-  // FREE SERVICES — skip payment entirely
-  const isFree = Number(service.priceUsdcPerCall) === 0;
+  // Test mode: allow web frontend to test without payment via ?test=true
+  const isTestMode = c.req.query("test") === "true";
+
+  // FREE SERVICES or TEST MODE — skip payment entirely
+  const isFree = Number(service.priceUsdcPerCall) === 0 || isTestMode;
 
   if (isFree) {
     // Call provider directly without payment
     const startTime = Date.now();
     try {
       const body = await c.req.text();
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      const isHF = service.endpointUrl.includes("huggingface.co") ||
-        service.endpointUrl.includes("hf.space");
-      if (isHF && process.env.HF_TOKEN) {
-        headers["Authorization"] = `Bearer ${process.env.HF_TOKEN}`;
-      }
-
-      const providerResponse = await fetch(service.endpointUrl, {
-        method: "POST",
-        headers,
-        body,
-        signal: AbortSignal.timeout(30000),
-      });
+      const providerResponse = await callProvider(service.endpointUrl, body);
 
       const latencyMs = Date.now() - startTime;
       if (!providerResponse.ok) {
@@ -61,20 +72,62 @@ callRouter.post("/:serviceId", async (c) => {
     }
   }
 
-  // PAID SERVICES — require x402 payment
-  // Check for payment header
+  // ── API-KEY AUTHENTICATED CALLS (MCP / SDK) ──
+  // If user sends X-Stoa-Key, authenticate and call without x402.
+  // Cost is logged for usage tracking; on-chain settlement skipped.
+  const apiKey = c.req.header("X-Stoa-Key");
+  if (apiKey) {
+    const keyHash = createHash("sha256").update(apiKey).digest("hex");
+    const user = await getUserByApiKey(keyHash);
+    if (!user) {
+      return c.json({ error: "Invalid API key" }, 401);
+    }
+
+    const startTime = Date.now();
+    try {
+      const body = await c.req.text();
+      const providerResponse = await callProvider(service.endpointUrl, body);
+      const latencyMs = Date.now() - startTime;
+
+      if (!providerResponse.ok) {
+        logCall({ serviceId, callerAddress: user.walletAddress || user.id, success: false, latencyMs, costUsdc: 0, errorMessage: `Provider returned ${providerResponse.status}` }).catch(() => { });
+        updateServiceMetrics(serviceId, false, latencyMs).catch(() => { });
+        return c.json({ error: "Service returned an error" }, 502);
+      }
+
+      const cost = Number(service.priceUsdcPerCall);
+      logCall({ serviceId, callerAddress: user.walletAddress || user.id, success: true, latencyMs, costUsdc: cost }).catch(() => { });
+      updateServiceMetrics(serviceId, true, latencyMs).catch(() => { });
+
+      const result = await providerResponse.json();
+      return c.json({ result, cost, latencyMs, paidVia: "api-key" });
+    } catch {
+      const latencyMs = Date.now() - startTime;
+      logCall({ serviceId, callerAddress: user.walletAddress || user.id, success: false, latencyMs, costUsdc: 0, errorMessage: "Service endpoint unreachable" }).catch(() => { });
+      updateServiceMetrics(serviceId, false, latencyMs).catch(() => { });
+      return c.json({ error: "Service endpoint unreachable" }, 502);
+    }
+  }
+
+  // ── PAID SERVICES — require x402 payment (anonymous callers) ──
   const paymentHeader = c.req.header("X-PAYMENT");
 
   if (!paymentHeader) {
-    // Build payment requirements for this specific service
+    // Build payment requirements for this specific service (with 10s timeout)
     try {
-      const requirements = await resourceServer.buildPaymentRequirements({
+      const requirementsPromise = resourceServer.buildPaymentRequirements({
         scheme: "exact",
         payTo: service.ownerAddress || PROVIDER_WALLET,
         price: service.priceUsdcPerCall,
         network: X402_NETWORK,
         maxTimeoutSeconds: 60,
       });
+      const requirements = await Promise.race([
+        requirementsPromise,
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("Payment requirements timeout")), 10000)
+        ),
+      ]) as Awaited<typeof requirementsPromise>;
 
       return c.json(
         {
@@ -124,8 +177,8 @@ callRouter.post("/:serviceId", async (c) => {
 
     // Build headers — inject HF token for HuggingFace endpoints
     const headers: Record<string, string> = { "Content-Type": "application/json" };
-    const isHF = service.endpointUrl.includes("router.huggingface.co") ||
-      service.endpointUrl.includes("api-inference.huggingface.co");
+    const isHF = service.endpointUrl.includes("huggingface.co") ||
+      service.endpointUrl.includes("hf.space");
     if (isHF && process.env.HF_TOKEN) {
       headers["Authorization"] = `Bearer ${process.env.HF_TOKEN}`;
     }
