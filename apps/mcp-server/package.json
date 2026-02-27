@@ -1,6 +1,6 @@
 {
   "name": "stoa-mcp-server",
-  "version": "0.2.2",
+  "version": "0.3.1",
   "description": "MCP server for the Stoa AI marketplace — discover, call, and pay for AI services from Claude Desktop or Cursor",
   "license": "MIT",
   "author": "Stoa",

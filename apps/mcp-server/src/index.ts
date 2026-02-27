@@ -9,8 +9,26 @@ import { x402Client, wrapFetchWithPayment } from "@x402/fetch";
 import { registerExactEvmScheme } from "@x402/evm/exact/client";
 import { toClientEvmSigner } from "@x402/evm";
 import { privateKeyToAccount } from "viem/accounts";
-import { createPublicClient, http } from "viem";
+import { createPublicClient, http, parseAbi } from "viem";
 import { baseSepolia } from "viem/chains";
+
+const USDC_ADDRESS = "0x036CbD53842c5426634e7929541eC2318f3dCF7e" as const;
+const USDC_ABI = parseAbi(["function balanceOf(address) view returns (uint256)"]);
+
+async function getUsdcBalance(address: `0x${string}`): Promise<number> {
+  try {
+    const client = createPublicClient({ chain: baseSepolia, transport: http() });
+    const balance = await client.readContract({
+      address: USDC_ADDRESS,
+      abi: USDC_ABI,
+      functionName: "balanceOf",
+      args: [address],
+    });
+    return Number(balance) / 1e6;
+  } catch {
+    return -1;
+  }
+}
 
 const STOA_API_URL = process.env.STOA_API_URL || "https://stoa-api-production-58bd.up.railway.app";
 const STOA_API_KEY = process.env.STOA_API_KEY;
@@ -514,16 +532,20 @@ server.tool(
   "Check your wallet address and payment method",
   {},
   async () => {
-    // If user has a local wallet key, show that
+    // If user has a local wallet key, show that with real on-chain balance
     if (walletAddress) {
+      const balance = await getUsdcBalance(walletAddress as `0x${string}`);
+      const balanceText = balance >= 0 ? `${balance} USDC` : "Unable to fetch";
       const text = [
         `**Wallet Status (Local Key)**`,
         `Address: ${walletAddress}`,
+        `Balance: ${balanceText}`,
         `Network: Base Sepolia`,
-        `Payment: x402 on-chain (USDC signed by your key)`,
+        `Payment: x402 on-chain (USDC signed automatically by your key)`,
         "",
-        "Fund with Base Sepolia USDC from https://faucet.circle.com/",
-        `USDC Contract: \`0x036CbD53842c5426634e7929541eC2318f3dCF7e\``,
+        balance > 0
+          ? "Wallet is funded and ready. You can call paid services directly."
+          : "Fund with Base Sepolia USDC from https://faucet.circle.com/",
       ].join("\n");
       return { content: [{ type: "text", text }] };
     }
@@ -584,16 +606,22 @@ server.tool(
       }
     }
 
+    const balance = await getUsdcBalance(address as `0x${string}`);
     const text = [
       `**Fund Your Wallet**`,
       "",
       `Address: \`${address}\``,
+      `Current balance: ${balance >= 0 ? balance : "?"} USDC`,
       `Network: Base Sepolia (Chain ID: 84532)`,
       "",
-      "**How to fund:**",
-      "1. Get testnet USDC from https://faucet.circle.com/",
-      "2. Select Base Sepolia network",
-      "3. Enter your address above",
+      balance > 0
+        ? "Wallet is already funded and ready to use for paid service calls."
+        : [
+          "**How to fund:**",
+          "1. Get testnet USDC from https://faucet.circle.com/",
+          "2. Select Base Sepolia network",
+          "3. Enter your address above",
+        ].join("\n"),
       "",
       `USDC Contract: \`0x036CbD53842c5426634e7929541eC2318f3dCF7e\``,
     ].join("\n");

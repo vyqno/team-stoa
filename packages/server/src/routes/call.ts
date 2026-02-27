@@ -4,7 +4,8 @@ import { UUID_REGEX } from "@stoa/shared";
 import { getServiceById, logCall, updateServiceMetrics, getUserByApiKey } from "@stoa/db";
 import { resourceServer, X402_NETWORK } from "../lib/facilitator.js";
 
-const PROVIDER_WALLET = process.env.PROVIDER_WALLET_ADDRESS || "0x0000000000000000000000000000000000000000";
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+const PROVIDER_WALLET = process.env.PROVIDER_WALLET_ADDRESS || ZERO_ADDRESS;
 
 export const callRouter = new Hono();
 
@@ -119,7 +120,9 @@ callRouter.post("/:serviceId", async (c) => {
     try {
       const requirementsPromise = resourceServer.buildPaymentRequirements({
         scheme: "exact",
-        payTo: service.ownerAddress || PROVIDER_WALLET,
+        payTo: (service.ownerAddress && service.ownerAddress !== ZERO_ADDRESS)
+          ? service.ownerAddress
+          : PROVIDER_WALLET,
         price: service.priceUsdcPerCall,
         network: X402_NETWORK,
         maxTimeoutSeconds: 60,
