@@ -19,6 +19,49 @@ callRouter.post("/:serviceId", async (c) => {
     return c.json({ error: "Service not found or inactive" }, 404);
   }
 
+  // FREE SERVICES — skip payment entirely
+  const isFree = Number(service.priceUsdcPerCall) === 0;
+
+  if (isFree) {
+    // Call provider directly without payment
+    const startTime = Date.now();
+    try {
+      const body = await c.req.text();
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      const isHF = service.endpointUrl.includes("huggingface.co") ||
+        service.endpointUrl.includes("hf.space");
+      if (isHF && process.env.HF_TOKEN) {
+        headers["Authorization"] = `Bearer ${process.env.HF_TOKEN}`;
+      }
+
+      const providerResponse = await fetch(service.endpointUrl, {
+        method: "POST",
+        headers,
+        body,
+        signal: AbortSignal.timeout(30000),
+      });
+
+      const latencyMs = Date.now() - startTime;
+      if (!providerResponse.ok) {
+        logCall({ serviceId, callerAddress: "free", success: false, latencyMs, costUsdc: 0, errorMessage: `Provider returned ${providerResponse.status}` }).catch(() => { });
+        updateServiceMetrics(serviceId, false, latencyMs).catch(() => { });
+        return c.json({ error: "Service returned an error" }, 502);
+      }
+
+      logCall({ serviceId, callerAddress: "free", success: true, latencyMs, costUsdc: 0 }).catch(() => { });
+      updateServiceMetrics(serviceId, true, latencyMs).catch(() => { });
+
+      const result = await providerResponse.json();
+      return c.json({ result, cost: 0, latencyMs, free: true });
+    } catch {
+      const latencyMs = Date.now() - startTime;
+      logCall({ serviceId, callerAddress: "free", success: false, latencyMs, costUsdc: 0, errorMessage: "Service endpoint unreachable" }).catch(() => { });
+      updateServiceMetrics(serviceId, false, latencyMs).catch(() => { });
+      return c.json({ error: "Service endpoint unreachable" }, 502);
+    }
+  }
+
+  // PAID SERVICES — require x402 payment
   // Check for payment header
   const paymentHeader = c.req.header("X-PAYMENT");
 
@@ -79,9 +122,11 @@ callRouter.post("/:serviceId", async (c) => {
   try {
     const body = await c.req.text();
 
-    // Build headers — inject HF token for HuggingFace Inference API endpoints
+    // Build headers — inject HF token for HuggingFace endpoints
     const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (service.endpointUrl.includes("api-inference.huggingface.co") && process.env.HF_TOKEN) {
+    const isHF = service.endpointUrl.includes("router.huggingface.co") ||
+      service.endpointUrl.includes("api-inference.huggingface.co");
+    if (isHF && process.env.HF_TOKEN) {
       headers["Authorization"] = `Bearer ${process.env.HF_TOKEN}`;
     }
 
@@ -101,8 +146,8 @@ callRouter.post("/:serviceId", async (c) => {
       latencyMs,
       costUsdc: 0,
       errorMessage: "Service endpoint unreachable",
-    }).catch(() => {});
-    updateServiceMetrics(serviceId, false, latencyMs).catch(() => {});
+    }).catch(() => { });
+    updateServiceMetrics(serviceId, false, latencyMs).catch(() => { });
 
     return c.json({ error: "Service endpoint unreachable" }, 502);
   }
@@ -119,8 +164,8 @@ callRouter.post("/:serviceId", async (c) => {
       latencyMs,
       costUsdc: 0,
       errorMessage: `Provider returned ${providerResponse.status}`,
-    }).catch(() => {});
-    updateServiceMetrics(serviceId, false, latencyMs).catch(() => {});
+    }).catch(() => { });
+    updateServiceMetrics(serviceId, false, latencyMs).catch(() => { });
 
     if (providerResponse.status >= 500) {
       return c.json({ error: "Service returned an error" }, 502);
@@ -154,8 +199,8 @@ callRouter.post("/:serviceId", async (c) => {
     latencyMs,
     costUsdc: service.priceUsdcPerCall,
     txHash: txHash || undefined,
-  }).catch(() => {});
-  updateServiceMetrics(serviceId, true, latencyMs).catch(() => {});
+  }).catch(() => { });
+  updateServiceMetrics(serviceId, true, latencyMs).catch(() => { });
 
   // Fire webhook if configured
   if (service.webhookUrl) {
@@ -171,7 +216,7 @@ callRouter.post("/:serviceId", async (c) => {
         basescanUrl: basescanUrl || null,
         timestamp: new Date().toISOString(),
       }),
-    }).catch(() => {});
+    }).catch(() => { });
   }
 
   const result = await providerResponse.json();
