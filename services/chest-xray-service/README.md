@@ -6,6 +6,7 @@ colorTo: indigo
 sdk: docker
 pinned: false
 license: mit
+short_description: Pneumonia detection from chest X-ray images via HuggingFace
 ---
 
 # Chest X-Ray Pneumonia Detector

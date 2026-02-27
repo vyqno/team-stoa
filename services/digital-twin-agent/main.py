@@ -14,7 +14,7 @@ app = FastAPI(title="Digital Twin Agent", version="1.0.0")
 
 # --- Configuration ---
 
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+# GROQ_API_KEY goes here dynamically, we read it in the route now
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
@@ -80,10 +80,17 @@ async def get_profile() -> ProfileResponse:
         topics_available=twin_data["topics"],
     )
 
+@app.get("/debug")
+async def debug():
+    # Only return keys, not values, for security
+    return {"env_keys": list(os.environ.keys())}
+
 
 @app.post("/ask")
 async def ask(req: AskRequest) -> AskResponse:
-    if not GROQ_API_KEY:
+    # Read dynamically to pick up Railway changes without full rebuilds sometimes
+    groq_api_key = os.environ.get("GROQ_API_KEY", "").strip()
+    if not groq_api_key:
         raise HTTPException(status_code=503, detail="GROQ_API_KEY not configured")
 
     messages = [
@@ -100,7 +107,7 @@ async def ask(req: AskRequest) -> AskResponse:
         response = await client.post(
             GROQ_URL,
             headers={
-                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Authorization": f"Bearer {groq_api_key}",
                 "Content-Type": "application/json",
             },
             json={

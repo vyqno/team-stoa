@@ -1,17 +1,19 @@
 """
 Chest X-Ray Pneumonia Detection Service
 Deployed as a FastAPI service on HuggingFace Spaces (Docker SDK).
-Uses HuggingFace Inference API for dima806/chest_xray_pneumonia_detection.
+Runs the model locally using transformers pipeline.
 """
 
 import os
 import base64
-import io
 import time
+import torch
+from io import BytesIO
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from huggingface_hub import InferenceClient
+from transformers import AutoImageProcessor, AutoModelForImageClassification
+from PIL import Image
 
 app = FastAPI(
     title="Chest X-Ray Pneumonia Detector",
@@ -28,13 +30,13 @@ app.add_middleware(
 
 # --- Configuration ---
 
-HF_TOKEN = os.environ.get("HF_TOKEN", "")
 MODEL_ID = os.environ.get("MODEL_ID", "dima806/chest_xray_pneumonia_detection")
 
-client = InferenceClient(
-    provider="hf-inference",
-    api_key=HF_TOKEN,
-)
+# Load model at startup (downloads weights on first run, cached after)
+print(f"Loading model: {MODEL_ID}...")
+processor = AutoImageProcessor.from_pretrained(MODEL_ID)
+model = AutoModelForImageClassification.from_pretrained(MODEL_ID)
+print("Model loaded!")
 
 
 # --- Models ---
@@ -69,39 +71,42 @@ async def health():
 
 @app.post("/predict")
 async def predict(req: PredictRequest) -> PredictResponse:
-    if not HF_TOKEN:
-        raise HTTPException(status_code=503, detail="HF_TOKEN not configured")
-
     # Decode base64 image
     try:
-        # Handle data URI prefix if present (e.g., "data:image/png;base64,...")
         image_data = req.image
         if "," in image_data and image_data.startswith("data:"):
             image_data = image_data.split(",", 1)[1]
 
         image_bytes = base64.b64decode(image_data)
+        image = Image.open(BytesIO(image_bytes)).convert("RGB")
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid base64 image data")
 
-    # Call HuggingFace Inference API
+    # Run inference locally
     start = time.time()
     try:
-        results = client.image_classification(
-            io.BytesIO(image_bytes),
-            model=MODEL_ID,
-        )
+        inputs = processor(images=image, return_tensors="pt")
+        with torch.no_grad():
+            outputs = model(**inputs)
+        logits = outputs.logits
+        probs = torch.nn.functional.softmax(logits, dim=-1)[0]
+        
+        probs_lst = probs.tolist()
+        results = []
+        for i, p in enumerate(probs_lst):
+            results.append({"label": model.config.id2label[i], "score": p})
+        results.sort(key=lambda x: x["score"], reverse=True)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Model inference failed: {str(e)}")
 
     latency_ms = int((time.time() - start) * 1000)
 
-    # Parse results — HF returns list of {label, score}
+    # Parse results — pipeline returns list of {label, score}
     predictions = [
-        Prediction(label=r.label, score=round(r.score, 4))
+        Prediction(label=r["label"], score=round(r["score"], 4))
         for r in results
     ]
 
-    # Top prediction is the diagnosis
     top = predictions[0] if predictions else Prediction(label="UNKNOWN", score=0.0)
 
     return PredictResponse(
