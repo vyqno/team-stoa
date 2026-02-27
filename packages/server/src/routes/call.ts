@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { UUID_REGEX } from "@stoa/shared";
 import { getServiceById, logCall, updateServiceMetrics, getUserByApiKey } from "@stoa/db";
 import { resourceServer, X402_NETWORK } from "../lib/facilitator.js";
+import { encodePaymentRequiredHeader } from "@x402/core/http";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const PROVIDER_WALLET = process.env.PROVIDER_WALLET_ADDRESS || ZERO_ADDRESS;
@@ -113,7 +114,8 @@ callRouter.post("/:serviceId", async (c) => {
   }
 
   // ── PAID SERVICES — require x402 payment (anonymous callers) ──
-  const paymentHeader = c.req.header("X-PAYMENT");
+  // v2 protocol uses PAYMENT-SIGNATURE header; v1 uses X-PAYMENT
+  const paymentHeader = c.req.header("PAYMENT-SIGNATURE") || c.req.header("X-PAYMENT");
 
   if (!paymentHeader) {
     // Build payment requirements for this specific service (with 10s timeout)
@@ -134,18 +136,30 @@ callRouter.post("/:serviceId", async (c) => {
         ),
       ]) as Awaited<typeof requirementsPromise>;
 
+      // Build full PaymentRequired object (x402 v2 spec)
+      const paymentRequired = {
+        x402Version: 2 as const,
+        resource: {
+          url: c.req.url,
+          description: service.name,
+          mimeType: "application/json",
+        },
+        accepts: requirements,
+      };
+
+      // x402 v2: encode in PAYMENT-REQUIRED header (base64)
+      // This is what @x402/fetch v2.5 client expects
+      const paymentRequiredHeader = encodePaymentRequiredHeader(paymentRequired);
+
       return c.json(
         {
-          x402Version: 2,
+          ...paymentRequired,
           error: "Payment required",
-          resource: {
-            url: c.req.url,
-            description: service.name,
-            mimeType: "application/json",
-          },
-          accepts: requirements,
         },
-        402,
+        {
+          status: 402,
+          headers: { "PAYMENT-REQUIRED": paymentRequiredHeader },
+        },
       );
     } catch (err) {
       console.error("Failed to build payment requirements:", err);
@@ -153,7 +167,7 @@ callRouter.post("/:serviceId", async (c) => {
     }
   }
 
-  // Payment present — verify it
+  // Payment present — verify it (decode base64 payload)
   let paymentPayload;
   try {
     paymentPayload = JSON.parse(
