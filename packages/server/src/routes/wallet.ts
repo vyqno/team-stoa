@@ -8,35 +8,39 @@ export const walletRouter = new Hono();
 // All wallet routes require authentication
 walletRouter.use("*", authenticateApiKey);
 
-async function ensureWallet(user: ReturnType<typeof getAuthUser>) {
+async function ensureWallet(user: ReturnType<typeof getAuthUser>): Promise<ReturnType<typeof getAuthUser> & { walletError?: string }> {
   if (user.walletAddress) return user;
 
-  const wallet = await createCdpWallet(user.id);
-  if (wallet) {
+  try {
+    const wallet = await createCdpWallet(user.id);
     await updateUserWallet(user.id, wallet.address, wallet.walletId);
     user.walletAddress = wallet.address;
     user.cdpWalletId = wallet.walletId;
+    return user;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`ensureWallet failed for user ${user.id}:`, msg);
+    return Object.assign(user, { walletError: msg });
   }
-  return user;
 }
 
 // GET /api/wallet/balance
 walletRouter.get("/balance", async (c) => {
-  const user = await ensureWallet(getAuthUser(c));
+  const result = await ensureWallet(getAuthUser(c));
 
-  if (!user.walletAddress) {
+  if (!result.walletAddress) {
     return c.json({
       address: null,
       balanceUsdc: 0,
       network: "base-sepolia",
-      message: "Wallet not yet created. CDP credentials may not be configured.",
-    });
+      error: (result as any).walletError || "Wallet not yet created",
+    }, 503);
   }
 
-  const balanceUsdc = await getWalletBalance(user.walletAddress);
+  const balanceUsdc = await getWalletBalance(result.walletAddress);
 
   return c.json({
-    address: user.walletAddress,
+    address: result.walletAddress,
     balanceUsdc,
     network: "base-sepolia",
   });
@@ -44,12 +48,18 @@ walletRouter.get("/balance", async (c) => {
 
 // GET /api/wallet/address
 walletRouter.get("/address", async (c) => {
-  const user = await ensureWallet(getAuthUser(c));
+  const result = await ensureWallet(getAuthUser(c));
+
+  if (!result.walletAddress) {
+    return c.json({
+      address: null,
+      error: (result as any).walletError || "Wallet provisioning failed",
+    }, 503);
+  }
+
   return c.json({
-    address: user.walletAddress,
-    message: user.walletAddress
-      ? "Send USDC (Base Sepolia) to this address to fund your account"
-      : "Wallet not yet provisioned — CDP credentials may not be configured",
+    address: result.walletAddress,
+    message: "Send USDC (Base Sepolia) to this address to fund your account",
   });
 });
 

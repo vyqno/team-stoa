@@ -1,28 +1,10 @@
-import { config } from "dotenv";
-import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-
-const __dirname = fileURLToPath(new URL(".", import.meta.url));
-config({ path: resolve(__dirname, "../.env") });
-
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
-// HuggingFace Space URLs — set these after deploying your services
-// Format: https://<your-username>-<space-name>.hf.space
-const CHEST_XRAY_URL =
-  process.env.CHEST_XRAY_SERVICE_URL ||
-  "https://hiteshx33-chest-xray-service.hf.space";
+// Real, verified-working endpoints
+const CHEST_XRAY_URL = "https://hiteshx33-chest-xray-service.hf.space";
+const HF_ROUTER = "https://router.huggingface.co/hf-inference/models";
 
-const DIGITAL_TWIN_URL =
-  process.env.DIGITAL_TWIN_SERVICE_URL ||
-  "https://hiteshx33-digital-twin-agent.hf.space";
-
-// HuggingFace Inference API base (works directly for text models)
-const HF_API = "https://api-inference.huggingface.co/models";
-
-// Wallet addresses for service ownership
 const WALLET_A = "0x814a3D96C36C45e92159Ce119a82b3250Aa79E5b";
-const WALLET_B = "0x1ceC5F57eC0A6f782F736549eBd391ddF3233D8e";
 
 interface ServiceSeed {
   ownerAddress: string;
@@ -35,18 +17,15 @@ interface ServiceSeed {
   endpointUrl: string;
   inputSchema: Record<string, unknown>;
   outputSchema: Record<string, unknown>;
-  webhookUrl?: string;
 }
 
 const SERVICES: ServiceSeed[] = [
-  // ─── IMAGE MODELS (deployed via FastAPI wrapper on HF Spaces) ───
-
-  // 1. Chest X-Ray Analyzer — deployed as HF Space
+  // 1. Chest X-Ray Analyzer — runs locally on HF Spaces (verified working)
   {
     ownerAddress: WALLET_A,
     name: "Chest X-Ray Analyzer",
     description:
-      "Detects pneumonia from chest X-ray images using a ViT-based deep learning model trained on the NIH Chest X-ray dataset. Returns diagnosis with confidence scores. Deployed as a real-time inference service.",
+      "Detects pneumonia from chest X-ray images using a ViT-based deep learning model. Returns diagnosis (NORMAL/PNEUMONIA) with confidence scores. Model runs on HuggingFace Spaces.",
     capabilities: [
       "pneumonia detection",
       "chest x-ray analysis",
@@ -55,7 +34,7 @@ const SERVICES: ServiceSeed[] = [
     ],
     category: "medical",
     serviceType: "ml-model",
-    priceUsdcPerCall: 0.05,
+    priceUsdcPerCall: 0,
     endpointUrl: `${CHEST_XRAY_URL}/predict`,
     inputSchema: {
       type: "object",
@@ -71,7 +50,7 @@ const SERVICES: ServiceSeed[] = [
       type: "object",
       properties: {
         diagnosis: { type: "string", description: "NORMAL or PNEUMONIA" },
-        confidence: { type: "number", description: "Confidence score 0-1" },
+        confidence: { type: "number" },
         predictions: {
           type: "array",
           items: {
@@ -88,82 +67,12 @@ const SERVICES: ServiceSeed[] = [
     },
   },
 
-  // 2. Deepfake Detector
+  // 2. Sentiment Analyzer — HF Router
   {
     ownerAddress: WALLET_A,
-    name: "Deepfake Detector",
-    description:
-      "Detects AI-generated or manipulated face images using a fine-tuned deep learning model. Classifies images as real or deepfake with confidence scores.",
-    capabilities: [
-      "deepfake detection",
-      "face analysis",
-      "image forensics",
-      "AI detection",
-    ],
-    category: "security",
-    serviceType: "ml-model",
-    priceUsdcPerCall: 0.03,
-    endpointUrl: `${HF_API}/dima806/deepfake_vs_real_image_detection`,
-    inputSchema: {
-      type: "object",
-      properties: {
-        image: { type: "string", description: "Base64-encoded face image" },
-      },
-      required: ["image"],
-    },
-    outputSchema: {
-      type: "object",
-      properties: {
-        classification: { type: "string", enum: ["real", "deepfake"] },
-        confidence: { type: "number" },
-      },
-    },
-  },
-
-  // 3. Plant Disease Identifier
-  {
-    ownerAddress: WALLET_B,
-    name: "Plant Disease Identifier",
-    description:
-      "Identifies diseases in crop plants from leaf images using MobileNetV2 trained on 50k+ labeled plant disease images. Supports 38+ disease classes.",
-    capabilities: [
-      "plant disease detection",
-      "crop analysis",
-      "agriculture AI",
-      "leaf disease identification",
-    ],
-    category: "agriculture",
-    serviceType: "ml-model",
-    priceUsdcPerCall: 0.02,
-    endpointUrl: `${HF_API}/linkanjarad/mobilenet_v2_1.0_224-plant-disease-identification`,
-    inputSchema: {
-      type: "object",
-      properties: {
-        image: {
-          type: "string",
-          description: "Base64-encoded plant/leaf image",
-        },
-      },
-      required: ["image"],
-    },
-    outputSchema: {
-      type: "object",
-      properties: {
-        disease: { type: "string" },
-        plant: { type: "string" },
-        confidence: { type: "number" },
-      },
-    },
-  },
-
-  // ─── TEXT MODELS (HuggingFace Inference API — accepts JSON directly) ───
-
-  // 4. Sentiment Analyzer
-  {
-    ownerAddress: WALLET_B,
     name: "Sentiment Analyzer",
     description:
-      "Analyzes text sentiment in multiple languages using XLM-RoBERTa. Returns positive, negative, or neutral classification with scores.",
+      "Analyzes text sentiment in multiple languages using XLM-RoBERTa. Returns positive, negative, or neutral classification with confidence scores. Supports 100+ languages.",
     capabilities: [
       "sentiment analysis",
       "text classification",
@@ -172,8 +81,8 @@ const SERVICES: ServiceSeed[] = [
     ],
     category: "data",
     serviceType: "ml-model",
-    priceUsdcPerCall: 0.005,
-    endpointUrl: `${HF_API}/cardiffnlp/twitter-xlm-roberta-base-sentiment-multilingual`,
+    priceUsdcPerCall: 0,
+    endpointUrl: `${HF_ROUTER}/cardiffnlp/twitter-xlm-roberta-base-sentiment-multilingual`,
     inputSchema: {
       type: "object",
       properties: {
@@ -182,18 +91,21 @@ const SERVICES: ServiceSeed[] = [
       required: ["inputs"],
     },
     outputSchema: {
-      type: "object",
-      properties: {
-        sentiment: {
-          type: "string",
-          enum: ["positive", "negative", "neutral"],
+      type: "array",
+      items: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            label: { type: "string", enum: ["positive", "negative", "neutral"] },
+            score: { type: "number" },
+          },
         },
-        scores: { type: "object" },
       },
     },
   },
 
-  // 5. Text Summarizer
+  // 3. Text Summarizer — HF Router
   {
     ownerAddress: WALLET_A,
     name: "Text Summarizer",
@@ -207,8 +119,8 @@ const SERVICES: ServiceSeed[] = [
     ],
     category: "data",
     serviceType: "ml-model",
-    priceUsdcPerCall: 0.008,
-    endpointUrl: `${HF_API}/facebook/bart-large-cnn`,
+    priceUsdcPerCall: 0,
+    endpointUrl: `${HF_ROUTER}/facebook/bart-large-cnn`,
     inputSchema: {
       type: "object",
       properties: {
@@ -216,84 +128,116 @@ const SERVICES: ServiceSeed[] = [
         parameters: {
           type: "object",
           properties: {
-            max_length: {
-              type: "number",
-              description: "Maximum summary length",
-            },
-            min_length: {
-              type: "number",
-              description: "Minimum summary length",
-            },
+            max_length: { type: "number", description: "Maximum summary length" },
+            min_length: { type: "number", description: "Minimum summary length" },
           },
         },
       },
       required: ["inputs"],
     },
     outputSchema: {
-      type: "object",
-      properties: {
-        summary_text: { type: "string" },
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          summary_text: { type: "string" },
+        },
       },
     },
   },
 
-  // 6. Object Detector
+  // 4. Emotion Detector — detects 7 emotions in text
   {
-    ownerAddress: WALLET_B,
-    name: "Object Detector",
+    ownerAddress: WALLET_A,
+    name: "Emotion Detector",
     description:
-      "Detects and localizes objects in images using Facebook's DETR (Detection Transformer) with ResNet-50 backbone. Returns bounding boxes with labels and confidence scores for 91 COCO object categories.",
+      "Detects emotions in English text using a fine-tuned DistilRoBERTa model. Classifies into 7 emotions: anger, disgust, fear, joy, neutral, sadness, surprise. Useful for customer feedback analysis and social media monitoring.",
     capabilities: [
-      "object detection",
-      "image analysis",
-      "bounding box prediction",
-      "computer vision",
+      "emotion detection",
+      "text classification",
+      "affective computing",
+      "customer feedback analysis",
     ],
-    category: "research",
+    category: "data",
     serviceType: "ml-model",
-    priceUsdcPerCall: 0.01,
-    endpointUrl: `${HF_API}/facebook/detr-resnet-50`,
+    priceUsdcPerCall: 0,
+    endpointUrl: `${HF_ROUTER}/j-hartmann/emotion-english-distilroberta-base`,
     inputSchema: {
       type: "object",
       properties: {
-        image: { type: "string", description: "Base64-encoded image" },
+        inputs: { type: "string", description: "English text to analyze for emotions" },
       },
-      required: ["image"],
+      required: ["inputs"],
     },
     outputSchema: {
-      type: "object",
-      properties: {
-        detections: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              label: { type: "string" },
-              confidence: { type: "number" },
-              box: { type: "object" },
-            },
+      type: "array",
+      items: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            label: { type: "string", enum: ["anger", "disgust", "fear", "joy", "neutral", "sadness", "surprise"] },
+            score: { type: "number" },
           },
         },
       },
     },
   },
 
-  // 7. Zero-Shot Classifier
+  // 5. Named Entity Recognizer — extracts people, orgs, locations from text
   {
     ownerAddress: WALLET_A,
-    name: "Zero-Shot Classifier",
+    name: "Named Entity Recognizer",
     description:
-      "Classifies text into any set of user-defined categories without training. Uses Facebook's BART-Large-MNLI for natural language inference. Perfect for content moderation, topic tagging, and intent detection.",
+      "Extracts named entities (people, organizations, locations, miscellaneous) from English text using BERT-base-NER. Essential for information extraction, document processing, and knowledge graph construction.",
     capabilities: [
-      "zero-shot classification",
-      "text classification",
-      "intent detection",
-      "content categorization",
+      "named entity recognition",
+      "information extraction",
+      "NER",
+      "text analysis",
     ],
     category: "data",
-    serviceType: "api-tool",
-    priceUsdcPerCall: 0.005,
-    endpointUrl: `${HF_API}/facebook/bart-large-mnli`,
+    serviceType: "ml-model",
+    priceUsdcPerCall: 0,
+    endpointUrl: `${HF_ROUTER}/dslim/bert-base-NER`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        inputs: { type: "string", description: "Text to extract entities from (e.g. 'John works at Google in New York')" },
+      },
+      required: ["inputs"],
+    },
+    outputSchema: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          entity_group: { type: "string", description: "PER (person), ORG (organization), LOC (location), MISC" },
+          word: { type: "string" },
+          score: { type: "number" },
+          start: { type: "number" },
+          end: { type: "number" },
+        },
+      },
+    },
+  },
+
+  // 6. Zero-Shot Text Classifier — classify text into ANY categories
+  {
+    ownerAddress: WALLET_A,
+    name: "Zero-Shot Text Classifier",
+    description:
+      "Classifies text into arbitrary categories without training data using Facebook's BART-Large-MNLI. Provide any set of labels and it scores how well the text matches each. Perfect for dynamic categorization, intent detection, and topic routing.",
+    capabilities: [
+      "zero-shot classification",
+      "text categorization",
+      "intent detection",
+      "topic classification",
+    ],
+    category: "data",
+    serviceType: "ml-model",
+    priceUsdcPerCall: 0,
+    endpointUrl: `${HF_ROUTER}/facebook/bart-large-mnli`,
     inputSchema: {
       type: "object",
       properties: {
@@ -304,12 +248,9 @@ const SERVICES: ServiceSeed[] = [
             candidate_labels: {
               type: "array",
               items: { type: "string" },
-              description: "Labels to classify against",
+              description: "Labels to classify against (e.g. ['urgent', 'billing', 'technical support'])",
             },
-            multi_label: {
-              type: "boolean",
-              description: "Allow multiple labels",
-            },
+            multi_label: { type: "boolean", description: "Allow multiple labels to be true (default false)" },
           },
           required: ["candidate_labels"],
         },
@@ -326,55 +267,195 @@ const SERVICES: ServiceSeed[] = [
     },
   },
 
-  // 8. Digital Twin Agent — deployed as HF Space
+  // 7. Question Answering Engine — extractive QA from context
   {
     ownerAddress: WALLET_A,
-    name: "Hitesh's Digital Twin",
+    name: "Question Answering Engine",
     description:
-      "An AI agent that represents Hitesh — a builder, hackathon enthusiast, and full-stack developer. Ask questions about web3 development, AI agents, hackathon tips, career advice, and startup building. Powered by Llama 3.3 70B via Groq.",
+      "Answers questions based on a given context paragraph using RoBERTa fine-tuned on SQuAD2. Extracts the exact answer span from the provided text. Ideal for document search, FAQ systems, and knowledge base querying.",
     capabilities: [
-      "personalized advice",
-      "career guidance",
-      "web3 expertise",
-      "hackathon tips",
-      "AI agent development",
+      "question answering",
+      "reading comprehension",
+      "extractive QA",
+      "document search",
     ],
-    category: "creative",
-    serviceType: "ai-agent",
-    priceUsdcPerCall: 0.05,
-    endpointUrl: `${DIGITAL_TWIN_URL}/ask`,
+    category: "research",
+    serviceType: "ml-model",
+    priceUsdcPerCall: 0,
+    endpointUrl: `${HF_ROUTER}/deepset/roberta-base-squad2`,
     inputSchema: {
       type: "object",
       properties: {
-        question: {
-          type: "string",
-          description: "Question to ask the digital twin",
-        },
-        context: {
-          type: "string",
-          description: "Optional context about yourself",
+        inputs: {
+          type: "object",
+          properties: {
+            question: { type: "string", description: "The question to answer" },
+            context: { type: "string", description: "The text paragraph containing the answer" },
+          },
+          required: ["question", "context"],
         },
       },
-      required: ["question"],
+      required: ["inputs"],
     },
     outputSchema: {
       type: "object",
       properties: {
         answer: { type: "string" },
-        confidence: { type: "number" },
-        topics: { type: "array", items: { type: "string" } },
-        twin_name: { type: "string" },
+        score: { type: "number" },
+        start: { type: "number" },
+        end: { type: "number" },
+      },
+    },
+  },
+
+  // 8. English to French Translator
+  {
+    ownerAddress: WALLET_A,
+    name: "English to French Translator",
+    description:
+      "Translates English text to French using Helsinki-NLP's OPUS-MT model trained on parallel corpora. Production-grade neural machine translation with high fluency.",
+    capabilities: [
+      "machine translation",
+      "English to French",
+      "NLP",
+      "language translation",
+    ],
+    category: "creative",
+    serviceType: "ml-model",
+    priceUsdcPerCall: 0,
+    endpointUrl: `${HF_ROUTER}/Helsinki-NLP/opus-mt-en-fr`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        inputs: { type: "string", description: "English text to translate to French" },
+      },
+      required: ["inputs"],
+    },
+    outputSchema: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          translation_text: { type: "string", description: "Translated French text" },
+        },
+      },
+    },
+  },
+
+  // 9. Toxicity Detector — content moderation
+  {
+    ownerAddress: WALLET_A,
+    name: "Toxicity Detector",
+    description:
+      "Detects toxic, obscene, threatening, and insulting content in text using a fine-tuned BERT model. Essential for content moderation, comment filtering, and community safety. Returns toxicity scores across multiple categories.",
+    capabilities: [
+      "toxicity detection",
+      "content moderation",
+      "hate speech detection",
+      "online safety",
+    ],
+    category: "security",
+    serviceType: "ml-model",
+    priceUsdcPerCall: 0,
+    endpointUrl: `${HF_ROUTER}/unitary/toxic-bert`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        inputs: { type: "string", description: "Text to check for toxicity" },
+      },
+      required: ["inputs"],
+    },
+    outputSchema: {
+      type: "array",
+      items: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            label: { type: "string", description: "toxic, severe_toxic, obscene, threat, insult, identity_hate" },
+            score: { type: "number" },
+          },
+        },
+      },
+    },
+  },
+
+  // 10. Language Detector — identifies 20 languages
+  {
+    ownerAddress: WALLET_A,
+    name: "Language Detector",
+    description:
+      "Identifies the language of input text from 20 supported languages using XLM-RoBERTa. Supports Arabic, Bulgarian, German, Greek, English, Spanish, French, Hindi, Italian, Japanese, Dutch, Polish, Portuguese, Russian, Swahili, Thai, Turkish, Urdu, Vietnamese, and Chinese.",
+    capabilities: [
+      "language detection",
+      "language identification",
+      "multilingual NLP",
+      "text preprocessing",
+    ],
+    category: "data",
+    serviceType: "ml-model",
+    priceUsdcPerCall: 0,
+    endpointUrl: `${HF_ROUTER}/papluca/xlm-roberta-base-language-detection`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        inputs: { type: "string", description: "Text to identify the language of" },
+      },
+      required: ["inputs"],
+    },
+    outputSchema: {
+      type: "array",
+      items: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            label: { type: "string", description: "ISO language code (en, fr, de, es, etc.)" },
+            score: { type: "number" },
+          },
+        },
+      },
+    },
+  },
+
+  // 11. Image Classifier — general-purpose image recognition
+  {
+    ownerAddress: WALLET_A,
+    name: "Image Classifier",
+    description:
+      "Classifies images into 1000 ImageNet categories using Google's Vision Transformer (ViT). Recognizes objects, animals, scenes, vehicles, food, and more. Send a base64-encoded image to get top predictions with confidence scores.",
+    capabilities: [
+      "image classification",
+      "object recognition",
+      "computer vision",
+      "visual AI",
+    ],
+    category: "data",
+    serviceType: "ml-model",
+    priceUsdcPerCall: 0,
+    endpointUrl: `${HF_ROUTER}/google/vit-base-patch16-224`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        inputs: { type: "string", description: "Base64-encoded image (JPEG/PNG)" },
+      },
+      required: ["inputs"],
+    },
+    outputSchema: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          label: { type: "string", description: "ImageNet category name" },
+          score: { type: "number" },
+        },
       },
     },
   },
 ];
 
 async function seed() {
-  console.log(`\nSeeding ${SERVICES.length} services to ${API_URL}...\n`);
-  console.log(`Wallet A: ${WALLET_A}`);
-  console.log(`Wallet B: ${WALLET_B}`);
-  console.log(`Chest X-Ray URL: ${CHEST_XRAY_URL}`);
-  console.log(`Digital Twin URL: ${DIGITAL_TWIN_URL}\n`);
+  console.log(`\nSeeding ${SERVICES.length} verified services to ${API_URL}...\n`);
 
   let ok = 0;
   let fail = 0;
@@ -389,17 +470,13 @@ async function seed() {
 
       if (!res.ok) {
         const error = await res.text();
-        console.error(
-          `  FAIL: ${service.name} [${service.serviceType}] — ${res.status}: ${error}`,
-        );
+        console.error(`  FAIL: ${service.name} — ${res.status}: ${error}`);
         fail++;
         continue;
       }
 
       const data = (await res.json()) as { service: { id: string } };
-      console.log(
-        `  OK: ${service.name} [${service.serviceType}] — ID: ${data.service.id}`,
-      );
+      console.log(`  OK: ${service.name} [${service.serviceType}] — ID: ${data.service.id}`);
       ok++;
     } catch (err) {
       console.error(`  ERROR: ${service.name} — ${err}`);
@@ -407,7 +484,7 @@ async function seed() {
     }
   }
 
-  console.log(`\nSeed complete: ${ok} succeeded, ${fail} failed.\n`);
+  console.log(`\nDone: ${ok} seeded, ${fail} failed.\n`);
 }
 
 seed().catch(console.error);

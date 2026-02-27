@@ -44,16 +44,26 @@ authRouter.post("/register", async (c) => {
   // Generate API key
   const { key: apiKey } = await createApiKey(user.id, "default");
 
-  // Create CDP wallet
-  const wallet = await createCdpWallet(user.id);
-  if (wallet) {
+  // Create CDP wallet (with retry)
+  let walletError: string | undefined;
+  try {
+    const wallet = await createCdpWallet(user.id);
     await updateUserWallet(user.id, wallet.address, wallet.walletId);
     user.walletAddress = wallet.address;
     user.cdpWalletId = wallet.walletId;
+  } catch (err) {
+    walletError = err instanceof Error ? err.message : String(err);
+    console.error(`Wallet creation failed for user ${user.id}:`, walletError);
   }
+
+  // Also return a JWT so frontend is immediately authenticated
+  const token = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, {
+    expiresIn: "7d",
+  });
 
   return c.json(
     {
+      token,
       user: {
         id: user.id,
         email: user.email,
@@ -61,6 +71,7 @@ authRouter.post("/register", async (c) => {
       },
       apiKey, // Only returned once
       message: "Save your API key — it won't be shown again",
+      ...(walletError && { walletWarning: `Wallet provisioning failed: ${walletError}. Call GET /api/wallet/address to retry.` }),
     },
     201,
   );
@@ -184,13 +195,17 @@ authRouter.post("/google", async (c) => {
     }
   }
 
-  // Create CDP wallet if not provisioned
+  // Create CDP wallet if not provisioned (with retry)
+  let walletError: string | undefined;
   if (!user.walletAddress) {
-    const wallet = await createCdpWallet(user.id);
-    if (wallet) {
+    try {
+      const wallet = await createCdpWallet(user.id);
       await updateUserWallet(user.id, wallet.address, wallet.walletId);
       user.walletAddress = wallet.address;
       user.cdpWalletId = wallet.walletId;
+    } catch (err) {
+      walletError = err instanceof Error ? err.message : String(err);
+      console.error(`Wallet creation failed for Google user ${user.id}:`, walletError);
     }
   }
 
@@ -212,6 +227,10 @@ authRouter.post("/google", async (c) => {
   if (apiKey) {
     response.apiKey = apiKey;
     response.message = "Save your API key — it won't be shown again";
+  }
+
+  if (walletError) {
+    response.walletWarning = `Wallet provisioning failed: ${walletError}. Call GET /api/wallet/address to retry.`;
   }
 
   return c.json(response, isNewUser ? 201 : 200);

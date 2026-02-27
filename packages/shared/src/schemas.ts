@@ -14,7 +14,7 @@ export const serviceRegistrationSchema = z.object({
   capabilities: z.array(z.string()).min(1),
   category: serviceCategorySchema,
   serviceType: serviceTypeSchema.default("ml-model"),
-  priceUsdcPerCall: z.number().positive(),
+  priceUsdcPerCall: z.number().nonnegative(),
   endpointUrl: z.string().url(),
   inputSchema: jsonSchemaSchema,
   outputSchema: jsonSchemaSchema,

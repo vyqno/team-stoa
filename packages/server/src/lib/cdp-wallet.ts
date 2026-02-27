@@ -8,47 +8,33 @@ const USDC_ABI = parseAbi([
   "function balanceOf(address account) view returns (uint256)",
 ]);
 
-// Cooldown: don't retry wallet creation for 5s after a failure
-let lastFailure = 0;
-const COOLDOWN_MS = 5_000;
-
-export async function createCdpWallet(_userId: string): Promise<{
+export async function createCdpWallet(userId: string): Promise<{
   address: string;
   walletId: string;
-} | null> {
-  // Skip if we recently failed (rate limit protection)
-  if (Date.now() - lastFailure < COOLDOWN_MS) {
-    console.log("CDP wallet creation skipped — cooldown active");
-    return null;
-  }
-
+}> {
   const apiKeyName = process.env.CDP_API_KEY_ID;
   const apiKeyPrivateKey = process.env.CDP_API_KEY_SECRET;
 
   if (!apiKeyName || !apiKeyPrivateKey) {
-    console.warn("CDP credentials not configured — skipping wallet creation");
-    return null;
+    throw new Error(
+      "CDP credentials not configured. Set CDP_API_KEY_ID and CDP_API_KEY_SECRET.",
+    );
   }
 
-  try {
-    const wallet = await CdpWalletProvider.configureWithWallet({
-      apiKeyName,
-      apiKeyPrivateKey,
-      networkId: "base-sepolia",
-    });
+  // Single attempt — no retries, no global cooldown
+  const wallet = await CdpWalletProvider.configureWithWallet({
+    apiKeyName,
+    apiKeyPrivateKey: apiKeyPrivateKey.replace(/\\n/g, "\n"),
+    networkId: "base-sepolia",
+  });
 
-    const walletData = await wallet.exportWallet();
-    const walletDataStr = JSON.stringify(walletData);
+  const walletData = await wallet.exportWallet();
 
-    return {
-      address: wallet.getAddress(),
-      walletId: walletDataStr,
-    };
-  } catch (err) {
-    lastFailure = Date.now();
-    console.error("CDP wallet creation failed (cooldown 60s):", err);
-    return null;
-  }
+  console.log(`CDP wallet created for user ${userId}: ${wallet.getAddress()}`);
+  return {
+    address: wallet.getAddress(),
+    walletId: JSON.stringify(walletData),
+  };
 }
 
 export async function getWalletBalance(walletAddress: string): Promise<number> {

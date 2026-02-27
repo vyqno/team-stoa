@@ -2,10 +2,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import { RegistryClient } from "./lib/registry-client.js";
 
 const STOA_API_URL = process.env.STOA_API_URL || "https://stoa-api-production-58bd.up.railway.app";
 const STOA_API_KEY = process.env.STOA_API_KEY;
+const CHEST_XRAY_URL = "https://hiteshx33-chest-xray-service.hf.space";
 
 const registry = new RegistryClient(STOA_API_URL, STOA_API_KEY);
 
@@ -281,12 +284,117 @@ server.tool(
 );
 
 // ─────────────────────────────────────────────
+// CHEST X-RAY: Direct ML inference (demo)
+// ─────────────────────────────────────────────
+
+server.tool(
+  "analyze_xray",
+  "Analyze a chest X-ray image for pneumonia detection. Provide either a local file path to the image or raw base64-encoded image data. This is a FREE service powered by a ViT deep learning model.",
+  {
+    filePath: z.string().optional().describe("Absolute path to a chest X-ray image file (JPEG/PNG) on your computer"),
+    imageBase64: z.string().optional().describe("Raw base64-encoded image data (if you already have it)"),
+  },
+  async ({ filePath, imageBase64 }) => {
+    try {
+      let base64Data: string;
+
+      if (filePath) {
+        // Read image from disk and convert to base64
+        const absPath = resolve(filePath);
+        const fileBuffer = await readFile(absPath);
+        base64Data = fileBuffer.toString("base64");
+      } else if (imageBase64) {
+        // Strip data URI prefix if present
+        base64Data = imageBase64.includes(",") && imageBase64.startsWith("data:")
+          ? imageBase64.split(",")[1]
+          : imageBase64;
+      } else {
+        return {
+          content: [{
+            type: "text",
+            text: "Please provide either a `filePath` (path to X-ray image on disk) or `imageBase64` (base64-encoded image data).",
+          }],
+        };
+      }
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 90000);
+
+      const response = await fetch(`${CHEST_XRAY_URL}/predict`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: base64Data }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+
+      if (!response.ok) {
+        const errText = await response.text();
+        return {
+          content: [{
+            type: "text",
+            text: `X-ray analysis failed (${response.status}): ${errText}`,
+          }],
+        };
+      }
+
+      const result = (await response.json()) as {
+        diagnosis: string;
+        confidence: number;
+        predictions: { label: string; score: number }[];
+        model: string;
+        latency_ms: number;
+      };
+
+      const diagEmoji = result.diagnosis === "PNEUMONIA" ? "⚠️" : "✅";
+      const confidencePct = (result.confidence * 100).toFixed(1);
+
+      const text = [
+        `${diagEmoji} **Chest X-Ray Analysis Result**`,
+        "",
+        `**Diagnosis: ${result.diagnosis}**`,
+        `**Confidence: ${confidencePct}%**`,
+        "",
+        "**All predictions:**",
+        ...result.predictions.map(
+          (p) => `- ${p.label}: ${(p.score * 100).toFixed(1)}%`,
+        ),
+        "",
+        `Model: ${result.model}`,
+        `Inference time: ${result.latency_ms}ms`,
+        "",
+        "⚕️ *This is an AI-assisted screening tool. Always consult a qualified radiologist for clinical decisions.*",
+        "",
+        `Powered by **Stoa AI Marketplace** — free service, no account required.`,
+      ].join("\n");
+
+      return { content: [{ type: "text", text }] };
+    } catch (err: any) {
+      if (err?.name === "AbortError") {
+        return {
+          content: [{
+            type: "text",
+            text: "X-ray analysis timed out (90s). The HuggingFace Space may be cold-starting — try again in 30 seconds.",
+          }],
+        };
+      }
+      return {
+        content: [{
+          type: "text",
+          text: `X-ray analysis error: ${err?.message || err}`,
+        }],
+      };
+    }
+  },
+);
+
+// ─────────────────────────────────────────────
 // PAID TOOL: call_service
 // ─────────────────────────────────────────────
 
 server.tool(
   "call_service",
-  "Call a paid Stoa marketplace service. Payment is handled automatically via your wallet.",
+  "Call a Stoa marketplace service. Free services work without an account. Paid services require an API key (set STOA_API_KEY in your MCP config).",
   {
     serviceId: z.string().describe("Service ID from find_service results"),
     input: z.record(z.string(), z.unknown()).describe("Input data matching the service's input schema"),
@@ -296,6 +404,7 @@ server.tool(
     try {
       const { service } = await registry.getService(serviceId);
 
+      // Spending guard
       if (maxSpendUsd && service.priceUsdcPerCall > maxSpendUsd) {
         return {
           content: [{
@@ -305,21 +414,58 @@ server.tool(
         };
       }
 
+      // For paid services, require API key
+      const isPaid = Number(service.priceUsdcPerCall) > 0;
+      if (isPaid && !STOA_API_KEY) {
+        return {
+          content: [{
+            type: "text",
+            text: [
+              `**${service.name}** costs $${service.priceUsdcPerCall}/call and requires authentication.`,
+              "",
+              "**To get started:**",
+              "1. Use the `create_account` tool to register (email + password)",
+              "2. Copy the API key from the response",
+              "3. Add `STOA_API_KEY` to your MCP server config:",
+              '   `"env": { "STOA_API_KEY": "stoa_your_key_here" }`',
+              "4. Restart your MCP client (Claude Desktop / Cursor)",
+              "5. Call this service again — it will work!",
+              "",
+              "Free services (like Chest X-Ray Analyzer) work without an account.",
+            ].join("\n"),
+          }],
+        };
+      }
+
       const callUrl = registry.getCallUrl(serviceId);
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (STOA_API_KEY) headers["X-Stoa-Key"] = STOA_API_KEY;
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 60000);
 
       const response = await fetch(callUrl, {
         method: "POST",
         headers,
         body: JSON.stringify(input),
+        signal: controller.signal,
       });
+      clearTimeout(timeout);
+
+      if (response.status === 401) {
+        return {
+          content: [{
+            type: "text",
+            text: `Invalid API key. Check your STOA_API_KEY in the MCP config. Use \`create_account\` to get a new key if needed.`,
+          }],
+        };
+      }
 
       if (response.status === 402) {
         return {
           content: [{
             type: "text",
-            text: `Payment required for ${service.name} ($${service.priceUsdcPerCall}). Your wallet may have insufficient balance. Use fund_wallet to see your address and top up.`,
+            text: `Payment required for ${service.name} ($${service.priceUsdcPerCall}). Ensure your STOA_API_KEY is set in the MCP config. Use \`create_account\` if you don't have one.`,
           }],
         };
       }
@@ -335,11 +481,16 @@ server.tool(
         txHash?: string;
         basescanUrl?: string;
         latencyMs?: number;
+        paidVia?: string;
+        free?: boolean;
       };
 
+      const costLine = result.free
+        ? "Cost: Free"
+        : `Cost: $${result.cost || service.priceUsdcPerCall} USDC`;
       const text = [
         `**${service.name}** — Call successful`,
-        `Cost: $${result.cost || service.priceUsdcPerCall} USDC`,
+        costLine,
         result.txHash ? `Transaction: ${result.basescanUrl || result.txHash}` : "",
         `Latency: ${result.latencyMs}ms`,
         "",
@@ -350,7 +501,10 @@ server.tool(
       ].filter(Boolean).join("\n");
 
       return { content: [{ type: "text", text }] };
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.name === "AbortError") {
+        return { content: [{ type: "text", text: "Service call timed out (60s). The service may be cold-starting on HuggingFace — try again in 30 seconds." }] };
+      }
       return { content: [{ type: "text", text: `Call error: ${err}` }] };
     }
   },
