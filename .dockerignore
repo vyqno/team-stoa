@@ -1,0 +1,11 @@
+node_modules
+.git
+.env
+*.md
+apps/web
+apps/mcp-server
+services
+scripts
+stoa-build-kit
+packages/contracts
+packages/agent-sdk

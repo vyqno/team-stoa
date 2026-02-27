@@ -5,12 +5,35 @@ import { z } from "zod";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { RegistryClient } from "./lib/registry-client.js";
+import { x402Client, wrapFetchWithPayment } from "@x402/fetch";
+import { registerExactEvmScheme } from "@x402/evm/exact/client";
+import { toClientEvmSigner } from "@x402/evm";
+import { privateKeyToAccount } from "viem/accounts";
+import { createPublicClient, http } from "viem";
+import { baseSepolia } from "viem/chains";
 
 const STOA_API_URL = process.env.STOA_API_URL || "https://stoa-api-production-58bd.up.railway.app";
 const STOA_API_KEY = process.env.STOA_API_KEY;
+const WALLET_PRIVATE_KEY = process.env.WALLET_PRIVATE_KEY;
 const CHEST_XRAY_URL = "https://hiteshx33-chest-xray-service.hf.space";
 
 const registry = new RegistryClient(STOA_API_URL, STOA_API_KEY);
+
+// x402 client-side payment: signs USDC payments with user's wallet key
+function createPaidFetch() {
+  if (!WALLET_PRIVATE_KEY) return null;
+  const account = privateKeyToAccount(WALLET_PRIVATE_KEY as `0x${string}`);
+  const publicClient = createPublicClient({ chain: baseSepolia, transport: http() });
+  const signer = toClientEvmSigner(account, publicClient);
+  const client = new x402Client();
+  registerExactEvmScheme(client, { signer });
+  return wrapFetchWithPayment(fetch, client);
+}
+
+const paidFetch = createPaidFetch();
+const walletAddress = WALLET_PRIVATE_KEY
+  ? privateKeyToAccount(WALLET_PRIVATE_KEY as `0x${string}`).address
+  : null;
 
 const server = new McpServer({
   name: "stoa",
@@ -289,33 +312,15 @@ server.tool(
 
 server.tool(
   "analyze_xray",
-  "Analyze a chest X-ray image for pneumonia detection. Provide either a local file path to the image or raw base64-encoded image data. This is a FREE service powered by a ViT deep learning model.",
+  "Analyze a chest X-ray image for pneumonia detection. Provide the absolute file path to an X-ray image on disk. DO NOT pass base64 data — just the file path. The tool reads the file directly. This is a FREE service.",
   {
-    filePath: z.string().optional().describe("Absolute path to a chest X-ray image file (JPEG/PNG) on your computer"),
-    imageBase64: z.string().optional().describe("Raw base64-encoded image data (if you already have it)"),
+    filePath: z.string().describe("Absolute file path to a chest X-ray image (JPEG/PNG) on the user's computer, e.g. C:/Users/name/xray.jpg"),
   },
-  async ({ filePath, imageBase64 }) => {
+  async ({ filePath }) => {
     try {
-      let base64Data: string;
-
-      if (filePath) {
-        // Read image from disk and convert to base64
-        const absPath = resolve(filePath);
-        const fileBuffer = await readFile(absPath);
-        base64Data = fileBuffer.toString("base64");
-      } else if (imageBase64) {
-        // Strip data URI prefix if present
-        base64Data = imageBase64.includes(",") && imageBase64.startsWith("data:")
-          ? imageBase64.split(",")[1]
-          : imageBase64;
-      } else {
-        return {
-          content: [{
-            type: "text",
-            text: "Please provide either a `filePath` (path to X-ray image on disk) or `imageBase64` (base64-encoded image data).",
-          }],
-        };
-      }
+      const absPath = resolve(filePath);
+      const fileBuffer = await readFile(absPath);
+      const base64Data = fileBuffer.toString("base64");
 
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 90000);
@@ -394,10 +399,10 @@ server.tool(
 
 server.tool(
   "call_service",
-  "Call a Stoa marketplace service. Free services work without an account. Paid services require an API key (set STOA_API_KEY in your MCP config).",
+  "Call a Stoa marketplace service. IMPORTANT: First use get_service_schema to check the required input format. Most ML models expect {\"inputs\": \"your text here\"}. Free services work without an account.",
   {
     serviceId: z.string().describe("Service ID from find_service results"),
-    input: z.record(z.string(), z.unknown()).describe("Input data matching the service's input schema"),
+    input: z.record(z.string(), z.unknown()).describe("Input JSON matching the service's inputSchema. Most HuggingFace models expect: {\"inputs\": \"text\"} for text, or {\"inputs\": {\"question\": \"...\", \"context\": \"...\"}} for QA"),
     maxSpendUsd: z.number().optional().describe("Maximum willing to spend in USD (safety guard)"),
   },
   async ({ serviceId, input, maxSpendUsd }) => {
@@ -414,24 +419,20 @@ server.tool(
         };
       }
 
-      // For paid services, require API key
+      // For paid services, require wallet key (or API key as fallback)
       const isPaid = Number(service.priceUsdcPerCall) > 0;
-      if (isPaid && !STOA_API_KEY) {
+      if (isPaid && !paidFetch && !STOA_API_KEY) {
         return {
           content: [{
             type: "text",
             text: [
-              `**${service.name}** costs $${service.priceUsdcPerCall}/call and requires authentication.`,
+              `**${service.name}** costs $${service.priceUsdcPerCall}/call.`,
               "",
-              "**To get started:**",
-              "1. Use the `create_account` tool to register (email + password)",
-              "2. Copy the API key from the response",
-              "3. Add `STOA_API_KEY` to your MCP server config:",
-              '   `"env": { "STOA_API_KEY": "stoa_your_key_here" }`',
-              "4. Restart your MCP client (Claude Desktop / Cursor)",
-              "5. Call this service again — it will work!",
+              "Add your wallet private key to the MCP config to enable on-chain payments:",
+              '`"env": { "WALLET_PRIVATE_KEY": "0xYourPrivateKey" }`',
               "",
-              "Free services (like Chest X-Ray Analyzer) work without an account.",
+              "Export from MetaMask: Settings → Security → Export Private Key",
+              "Fund with Base Sepolia USDC from https://faucet.circle.com/",
             ].join("\n"),
           }],
         };
@@ -439,12 +440,16 @@ server.tool(
 
       const callUrl = registry.getCallUrl(serviceId);
       const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (STOA_API_KEY) headers["X-Stoa-Key"] = STOA_API_KEY;
+
+      // Wallet key takes priority for on-chain payments; API key is fallback
+      const usePaidFetch = isPaid && paidFetch;
+      if (!usePaidFetch && STOA_API_KEY) headers["X-Stoa-Key"] = STOA_API_KEY;
+      const fetchFn = usePaidFetch ? paidFetch! : fetch;
 
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 60000);
 
-      const response = await fetch(callUrl, {
+      const response = await fetchFn(callUrl, {
         method: "POST",
         headers,
         body: JSON.stringify(input),
@@ -452,27 +457,17 @@ server.tool(
       });
       clearTimeout(timeout);
 
-      if (response.status === 401) {
-        return {
-          content: [{
-            type: "text",
-            text: `Invalid API key. Check your STOA_API_KEY in the MCP config. Use \`create_account\` to get a new key if needed.`,
-          }],
-        };
-      }
-
-      if (response.status === 402) {
-        return {
-          content: [{
-            type: "text",
-            text: `Payment required for ${service.name} ($${service.priceUsdcPerCall}). Ensure your STOA_API_KEY is set in the MCP config. Use \`create_account\` if you don't have one.`,
-          }],
-        };
-      }
-
       if (!response.ok) {
-        const errorText = await response.text();
-        return { content: [{ type: "text", text: `Service call failed (${response.status}): ${errorText}` }] };
+        const errorBody = await response.text();
+        const schemaHint = service.inputSchema
+          ? `\n\n**Expected input format:**\n\`\`\`json\n${JSON.stringify(service.inputSchema, null, 2)}\n\`\`\``
+          : "";
+        return {
+          content: [{
+            type: "text",
+            text: `**${service.name}** call failed (${response.status}): ${errorBody}${schemaHint}\n\nRetry with the correct input format shown above.`,
+          }],
+        };
       }
 
       const result = (await response.json()) as {
@@ -516,9 +511,24 @@ server.tool(
 
 server.tool(
   "get_wallet_status",
-  "Check your Stoa wallet balance and address",
+  "Check your wallet address and payment method",
   {},
   async () => {
+    // If user has a local wallet key, show that
+    if (walletAddress) {
+      const text = [
+        `**Wallet Status (Local Key)**`,
+        `Address: ${walletAddress}`,
+        `Network: Base Sepolia`,
+        `Payment: x402 on-chain (USDC signed by your key)`,
+        "",
+        "Fund with Base Sepolia USDC from https://faucet.circle.com/",
+        `USDC Contract: \`0x036CbD53842c5426634e7929541eC2318f3dCF7e\``,
+      ].join("\n");
+      return { content: [{ type: "text", text }] };
+    }
+
+    // Fall back to server-side wallet via API key
     const authErr = requireAuth();
     if (authErr) return authErr;
 
@@ -545,31 +555,50 @@ server.tool(
   "Get your wallet address and instructions for funding it with USDC",
   {},
   async () => {
-    const authErr = requireAuth();
-    if (authErr) return authErr;
+    const address = walletAddress;
 
-    try {
-      const wallet = await registry.getWalletBalance();
+    if (!address) {
+      // Fall back to server-side wallet
+      const authErr = requireAuth();
+      if (authErr) return authErr;
 
-      const text = [
-        `**Fund Your Wallet**`,
-        "",
-        `Address: \`${wallet.address || "Not yet provisioned"}\``,
-        `Current balance: ${wallet.balanceUsdc} USDC`,
-        `Network: Base Sepolia (Chain ID: 84532)`,
-        "",
-        "**How to fund:**",
-        "1. Send USDC on Base Sepolia to the address above",
-        "2. Get testnet USDC from the Base Sepolia faucet",
-        "3. Or visit stoa.ai/connect to top up with fiat",
-        "",
-        `USDC Contract: \`0x036CbD53842c5426634e7929541eC2318f3dCF7e\``,
-      ].join("\n");
-
-      return { content: [{ type: "text", text }] };
-    } catch (err) {
-      return { content: [{ type: "text", text: `Fund wallet error: ${err}` }] };
+      try {
+        const wallet = await registry.getWalletBalance();
+        const text = [
+          `**Fund Your Wallet**`,
+          "",
+          `Address: \`${wallet.address || "Not yet provisioned"}\``,
+          `Current balance: ${wallet.balanceUsdc} USDC`,
+          `Network: Base Sepolia (Chain ID: 84532)`,
+          "",
+          "**How to fund:**",
+          "1. Send USDC on Base Sepolia to the address above",
+          "2. Get testnet USDC from the Base Sepolia faucet",
+          "3. Or visit stoa.ai/connect to top up with fiat",
+          "",
+          `USDC Contract: \`0x036CbD53842c5426634e7929541eC2318f3dCF7e\``,
+        ].join("\n");
+        return { content: [{ type: "text", text }] };
+      } catch (err) {
+        return { content: [{ type: "text", text: `Fund wallet error: ${err}` }] };
+      }
     }
+
+    const text = [
+      `**Fund Your Wallet**`,
+      "",
+      `Address: \`${address}\``,
+      `Network: Base Sepolia (Chain ID: 84532)`,
+      "",
+      "**How to fund:**",
+      "1. Get testnet USDC from https://faucet.circle.com/",
+      "2. Select Base Sepolia network",
+      "3. Enter your address above",
+      "",
+      `USDC Contract: \`0x036CbD53842c5426634e7929541eC2318f3dCF7e\``,
+    ].join("\n");
+
+    return { content: [{ type: "text", text }] };
   },
 );
 

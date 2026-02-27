@@ -54,9 +54,10 @@ callRouter.post("/:serviceId", async (c) => {
 
       const latencyMs = Date.now() - startTime;
       if (!providerResponse.ok) {
-        logCall({ serviceId, callerAddress: "free", success: false, latencyMs, costUsdc: 0, errorMessage: `Provider returned ${providerResponse.status}` }).catch(() => { });
+        const providerError = await providerResponse.text().catch(() => "unknown");
+        logCall({ serviceId, callerAddress: "free", success: false, latencyMs, costUsdc: 0, errorMessage: `Provider returned ${providerResponse.status}: ${providerError}` }).catch(() => { });
         updateServiceMetrics(serviceId, false, latencyMs).catch(() => { });
-        return c.json({ error: "Service returned an error" }, 502);
+        return c.json({ error: `Provider error (${providerResponse.status}): ${providerError}`, inputSchema: service.inputSchema }, 502);
       }
 
       logCall({ serviceId, callerAddress: "free", success: true, latencyMs, costUsdc: 0 }).catch(() => { });
@@ -90,9 +91,10 @@ callRouter.post("/:serviceId", async (c) => {
       const latencyMs = Date.now() - startTime;
 
       if (!providerResponse.ok) {
-        logCall({ serviceId, callerAddress: user.walletAddress || user.id, success: false, latencyMs, costUsdc: 0, errorMessage: `Provider returned ${providerResponse.status}` }).catch(() => { });
+        const providerError = await providerResponse.text().catch(() => "unknown");
+        logCall({ serviceId, callerAddress: user.walletAddress || user.id, success: false, latencyMs, costUsdc: 0, errorMessage: `Provider returned ${providerResponse.status}: ${providerError}` }).catch(() => { });
         updateServiceMetrics(serviceId, false, latencyMs).catch(() => { });
-        return c.json({ error: "Service returned an error" }, 502);
+        return c.json({ error: `Provider error (${providerResponse.status}): ${providerError}`, inputSchema: service.inputSchema }, 502);
       }
 
       const cost = Number(service.priceUsdcPerCall);

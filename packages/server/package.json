@@ -12,20 +12,21 @@
     "lint": "eslint src/"
   },
   "dependencies": {
+    "@coinbase/agentkit": "^0.2.0",
+    "@coinbase/x402": "^2.1.0",
     "@hono/node-server": "^1.19.9",
     "@huggingface/inference": "^4.13.13",
     "@stoa/db": "workspace:*",
     "@stoa/shared": "workspace:*",
+    "@supabase/supabase-js": "^2.49.0",
     "@x402/core": "^2.5.0",
     "@x402/evm": "^2.5.0",
     "@x402/hono": "^2.5.0",
-    "@coinbase/agentkit": "^0.2.0",
-    "@supabase/supabase-js": "^2.49.0",
     "bcrypt": "^6.0.0",
-    "viem": "^2.23.0",
     "dotenv": "^17.3.1",
     "hono": "^4.12.3",
     "jsonwebtoken": "^9.0.3",
+    "viem": "^2.23.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {

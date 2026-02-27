@@ -16,6 +16,7 @@ const { callRouter } = await import("./routes/call.js");
 const { providersRouter } = await import("./routes/providers.js");
 const { activityRouter } = await import("./routes/activity.js");
 const { topupRouter } = await import("./routes/topup.js");
+const { digitalTwinRouter } = await import("./routes/digital-twin.js");
 const { initializeFacilitator } = await import("./lib/facilitator.js");
 const app = new Hono();
 
@@ -31,6 +32,7 @@ app.route("/api/services", servicesRouter);
 app.route("/api/auth", authRouter);
 app.route("/api/providers", providersRouter);
 app.route("/api/activity", activityRouter);
+app.route("/api/digital-twin", digitalTwinRouter);
 app.route("/v1/call", callRouter);
 
 const port = Number(process.env.PORT || 3001);

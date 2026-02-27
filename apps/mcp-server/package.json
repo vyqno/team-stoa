@@ -1,6 +1,6 @@
 {
-  "name": "@stoa/mcp-server",
-  "version": "0.1.0",
+  "name": "stoa-mcp-server",
+  "version": "0.2.2",
   "description": "MCP server for the Stoa AI marketplace — discover, call, and pay for AI services from Claude Desktop or Cursor",
   "license": "MIT",
   "author": "Stoa",
@@ -13,9 +13,11 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "stoa-mcp": "./dist/index.js"
+    "stoa-mcp-server": "./dist/index.js"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsx watch src/index.ts",
@@ -25,6 +27,9 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",
+    "@x402/evm": "^2.5.0",
+    "@x402/fetch": "^2.5.0",
+    "viem": "^2.23.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
