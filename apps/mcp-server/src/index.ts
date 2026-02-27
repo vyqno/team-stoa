@@ -4,7 +4,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { RegistryClient } from "./lib/registry-client.js";
 
-const STOA_API_URL = process.env.STOA_API_URL || "https://stoa-api.up.railway.app";
+const STOA_API_URL = process.env.STOA_API_URL || "https://stoa-api-production-58bd.up.railway.app";
 const STOA_API_KEY = process.env.STOA_API_KEY;
 
 const registry = new RegistryClient(STOA_API_URL, STOA_API_KEY);
@@ -25,6 +25,86 @@ function requireAuth(): { content: { type: "text"; text: string }[] } | null {
   }
   return null;
 }
+
+// ─────────────────────────────────────────────
+// ACCOUNT TOOLS: Register & Login (no API key needed)
+// ─────────────────────────────────────────────
+
+server.tool(
+  "create_account",
+  "Create a new Stoa marketplace account. Returns an API key you can use to call services and manage your wallet.",
+  {
+    email: z.string().describe("Your email address"),
+    password: z.string().describe("Choose a password (min 6 chars)"),
+    displayName: z.string().optional().describe("Your display name on the marketplace"),
+  },
+  async ({ email, password, displayName }) => {
+    try {
+      const result = await registry.register(email, password, displayName);
+
+      const text = [
+        `**Account Created!**`,
+        "",
+        `Email: ${result.user.email}`,
+        `User ID: ${result.user.id}`,
+        `Wallet: ${result.user.walletAddress || "Will be provisioned on first use"}`,
+        "",
+        `**Your API Key:**`,
+        `\`${result.apiKey}\``,
+        "",
+        `**IMPORTANT:** Save this key! Add it to your MCP config as \`STOA_API_KEY\` to unlock wallet, calling, and provider tools.`,
+        "",
+        "```json",
+        JSON.stringify({
+          mcpServers: {
+            stoa: {
+              command: "npx",
+              args: ["-y", "stoa-mcp-server"],
+              env: {
+                STOA_API_KEY: result.apiKey,
+              },
+            },
+          },
+        }, null, 2),
+        "```",
+      ].join("\n");
+
+      return { content: [{ type: "text", text }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Registration error: ${err}` }] };
+    }
+  },
+);
+
+server.tool(
+  "login",
+  "Log in to your existing Stoa account to get a JWT token",
+  {
+    email: z.string().describe("Your email address"),
+    password: z.string().describe("Your password"),
+  },
+  async ({ email, password }) => {
+    try {
+      const result = await registry.login(email, password);
+
+      const text = [
+        `**Logged in!**`,
+        "",
+        `Email: ${result.user.email}`,
+        `User ID: ${result.user.id}`,
+        `Wallet: ${result.user.walletAddress || "Not yet provisioned"}`,
+        "",
+        `JWT Token: \`${result.token.slice(0, 20)}...\``,
+        "",
+        `Use your API key (from registration) in the MCP config for persistent access.`,
+      ].join("\n");
+
+      return { content: [{ type: "text", text }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Login error: ${err}` }] };
+    }
+  },
+);
 
 // ─────────────────────────────────────────────
 // FREE TOOLS: Discovery
@@ -565,12 +645,69 @@ server.tool(
 );
 
 // ─────────────────────────────────────────────
-// Start
+// Start — stdio (CLI) or SSE (HTTP server)
 // ─────────────────────────────────────────────
 
 async function main() {
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
+  const PORT = process.env.PORT;
+
+  if (PORT) {
+    // SSE mode — for ChatGPT, remote MCP clients, and deployments
+    const { SSEServerTransport } = await import("@modelcontextprotocol/sdk/server/sse.js");
+    const http = await import("node:http");
+    const url = await import("node:url");
+
+    let sseTransport: InstanceType<typeof SSEServerTransport> | null = null;
+
+    const httpServer = http.createServer(async (req, res) => {
+      // CORS headers
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+      if (req.method === "OPTIONS") {
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+
+      const pathname = url.parse(req.url || "/").pathname;
+
+      if (pathname === "/sse" && req.method === "GET") {
+        // SSE connection endpoint
+        sseTransport = new SSEServerTransport("/messages", res);
+        await server.connect(sseTransport);
+      } else if (pathname === "/messages" && req.method === "POST") {
+        // Message endpoint
+        if (sseTransport) {
+          await sseTransport.handlePostMessage(req, res);
+        } else {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "No active SSE connection" }));
+        }
+      } else if (pathname === "/health") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ status: "ok", transport: "sse", tools: 16 }));
+      } else {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({
+          name: "stoa-mcp-server",
+          version: "1.0.0",
+          transport: "sse",
+          endpoints: { sse: "/sse", messages: "/messages", health: "/health" },
+          docs: "Connect to /sse for MCP over Server-Sent Events",
+        }));
+      }
+    });
+
+    httpServer.listen(Number(PORT), () => {
+      console.log(`Stoa MCP server (SSE) running on http://localhost:${PORT}/sse`);
+    });
+  } else {
+    // stdio mode — for Claude Desktop / Cursor
+    const transport = new StdioServerTransport();
+    await server.connect(transport);
+  }
 }
 
 main().catch(console.error);
