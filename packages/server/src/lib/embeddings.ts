@@ -13,14 +13,12 @@ function getClient(): InferenceClient {
 
 export async function generateEmbedding(text: string): Promise<number[]> {
   const hf = getClient();
-  const model = process.env.HF_EMBEDDING_MODEL || "nomic-ai/nomic-embed-text-v1.5";
-  const provider = process.env.HF_PROVIDER || "hf-inference";
+  const model = process.env.HF_EMBEDDING_MODEL || "sentence-transformers/all-mpnet-base-v2";
   const dimensions = Number(process.env.EMBEDDING_DIMENSIONS || "768");
 
   const result = await hf.featureExtraction({
     model,
     inputs: text,
-    provider: provider as "hf-inference",
   });
 
   const embedding = Array.isArray(result) ? (result as number[]) : Array.from(result as number[]);

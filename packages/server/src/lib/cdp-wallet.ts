@@ -8,10 +8,20 @@ const USDC_ABI = parseAbi([
   "function balanceOf(address account) view returns (uint256)",
 ]);
 
+// Cooldown: don't retry wallet creation for 60s after a failure
+let lastFailure = 0;
+const COOLDOWN_MS = 60_000;
+
 export async function createCdpWallet(_userId: string): Promise<{
   address: string;
   walletId: string;
 } | null> {
+  // Skip if we recently failed (rate limit protection)
+  if (Date.now() - lastFailure < COOLDOWN_MS) {
+    console.log("CDP wallet creation skipped — cooldown active");
+    return null;
+  }
+
   const apiKeyName = process.env.CDP_API_KEY_ID;
   const apiKeyPrivateKey = process.env.CDP_API_KEY_SECRET;
 
@@ -35,7 +45,8 @@ export async function createCdpWallet(_userId: string): Promise<{
       walletId: walletDataStr,
     };
   } catch (err) {
-    console.error("CDP wallet creation failed:", err);
+    lastFailure = Date.now();
+    console.error("CDP wallet creation failed (cooldown 60s):", err);
     return null;
   }
 }
