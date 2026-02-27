@@ -1,0 +1,32 @@
+{
+  "name": "@stoa/agent-sdk",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for the Stoa AI marketplace — discover, call, and pay for AI services programmatically",
+  "license": "MIT",
+  "author": "Stoa",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/stoa-ai/stoa"
+  },
+  "homepage": "https://stoa.ai",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": ["dist"],
+  "keywords": ["stoa", "ai", "agent", "marketplace", "x402", "usdc", "base", "mcp", "llm"],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}
