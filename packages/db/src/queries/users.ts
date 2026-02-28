@@ -124,3 +124,13 @@ export async function logTopUp(
     status: "completed",
   });
 }
+
+export async function getTopupHistory(userId: string, limit = 20) {
+  const { desc } = await import("drizzle-orm");
+  return db
+    .select()
+    .from(topupTransactions)
+    .where(eq(topupTransactions.userId, userId))
+    .orderBy(desc(topupTransactions.createdAt))
+    .limit(limit);
+}

@@ -34,6 +34,7 @@ const STOA_API_URL = process.env.STOA_API_URL || "https://stoa-api-production-58
 const STOA_API_KEY = process.env.STOA_API_KEY;
 const WALLET_PRIVATE_KEY = process.env.WALLET_PRIVATE_KEY;
 const CHEST_XRAY_URL = "https://hiteshx33-chest-xray-service.hf.space";
+const PLANT_DISEASE_URL = "https://hiteshx33-plant-disease-service.hf.space";
 
 const registry = new RegistryClient(STOA_API_URL, STOA_API_KEY);
 
@@ -412,6 +413,99 @@ server.tool(
 );
 
 // ─────────────────────────────────────────────
+// PLANT DISEASE: Direct ML inference (demo)
+// ─────────────────────────────────────────────
+
+server.tool(
+  "analyze_plant",
+  "Analyze a plant/leaf image to detect diseases. Provide the absolute file path to a leaf or plant image on disk. DO NOT pass base64 data — just the file path. The tool reads the file directly. This is a FREE service. Identifies 38 plant diseases across crops like tomato, potato, corn, grape, apple, and more.",
+  {
+    filePath: z.string().describe("Absolute file path to a plant/leaf image (JPEG/PNG) on the user's computer, e.g. C:/Users/name/leaf.jpg"),
+  },
+  async ({ filePath }) => {
+    try {
+      const absPath = resolve(filePath);
+      const fileBuffer = await readFile(absPath);
+      const base64Data = fileBuffer.toString("base64");
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 90000);
+
+      const response = await fetch(`${PLANT_DISEASE_URL}/predict`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: base64Data }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+
+      if (!response.ok) {
+        const errText = await response.text();
+        return {
+          content: [{
+            type: "text",
+            text: `Plant disease analysis failed (${response.status}): ${errText}`,
+          }],
+        };
+      }
+
+      const result = (await response.json()) as {
+        diagnosis: string;
+        confidence: number;
+        predictions: { label: string; score: number }[];
+        model: string;
+        latency_ms: number;
+      };
+
+      const confidencePct = (result.confidence * 100).toFixed(1);
+
+      // Determine if the plant is healthy or diseased
+      const isHealthy = result.diagnosis.toLowerCase().includes("healthy");
+      const statusEmoji = isHealthy ? "\u2705" : "\u26a0\ufe0f";
+      const statusLabel = isHealthy ? "Healthy" : "Disease Detected";
+
+      const text = [
+        `${statusEmoji} **Plant Disease Analysis Result**`,
+        "",
+        `**Status: ${statusLabel}**`,
+        `**Diagnosis: ${result.diagnosis}**`,
+        `**Confidence: ${confidencePct}%**`,
+        "",
+        "**All predictions:**",
+        ...result.predictions.slice(0, 10).map(
+          (p) => `- ${p.label}: ${(p.score * 100).toFixed(1)}%`,
+        ),
+        result.predictions.length > 10 ? `- ... and ${result.predictions.length - 10} more` : "",
+        "",
+        `Model: ${result.model}`,
+        `Inference time: ${result.latency_ms}ms`,
+        "",
+        "\ud83c\udf31 *This is an AI-assisted screening tool. Always consult a qualified agronomist for crop management decisions.*",
+        "",
+        `Powered by **Stoa AI Marketplace** \u2014 free service, no account required.`,
+      ].filter(Boolean).join("\n");
+
+      return { content: [{ type: "text", text }] };
+    } catch (err: any) {
+      if (err?.name === "AbortError") {
+        return {
+          content: [{
+            type: "text",
+            text: "Plant disease analysis timed out (90s). The HuggingFace Space may be cold-starting \u2014 try again in 30 seconds.",
+          }],
+        };
+      }
+      return {
+        content: [{
+          type: "text",
+          text: `Plant disease analysis error: ${err?.message || err}`,
+        }],
+      };
+    }
+  },
+);
+
+// ─────────────────────────────────────────────
 // PAID TOOL: call_service
 // ─────────────────────────────────────────────
 
@@ -518,7 +612,10 @@ server.tool(
       if (err?.name === "AbortError") {
         return { content: [{ type: "text", text: "Service call timed out (60s). The service may be cold-starting on HuggingFace — try again in 30 seconds." }] };
       }
-      return { content: [{ type: "text", text: `Call error: ${err}` }] };
+      const errMsg = err?.message || String(err);
+      const errDetails = err?.cause ? `\nCause: ${err.cause}` : "";
+      const errStack = err?.stack ? `\nStack: ${err.stack.split("\n").slice(0, 3).join("\n")}` : "";
+      return { content: [{ type: "text", text: `Call error: ${errMsg}${errDetails}${errStack}` }] };
     }
   },
 );

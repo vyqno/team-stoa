@@ -8,7 +8,9 @@ dist/
 .claude/
 stoa-build-kit/
 
+
 # Large files / not needed in repo
 2026-02-27-implement-the-following-plan.txt
 stoa-build-kit/references/
 image.png
+stoa.front.demo/

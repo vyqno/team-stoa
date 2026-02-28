@@ -24,21 +24,50 @@ async function ensureWallet(user: ReturnType<typeof getAuthUser>): Promise<Retur
   }
 }
 
+// POST /api/wallet/link — link an external (BYO) wallet
+walletRouter.post("/link", async (c) => {
+  const user = getAuthUser(c);
+  const { walletAddress } = await c.req.json();
+
+  if (!walletAddress || !/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) {
+    return c.json({ error: "Invalid wallet address" }, 400);
+  }
+
+  await updateUserWallet(user.id, walletAddress, "external");
+
+  return c.json({
+    address: walletAddress,
+    message: "Wallet linked successfully",
+  });
+});
+
 // GET /api/wallet/balance
 walletRouter.get("/balance", async (c) => {
-  const result = await ensureWallet(getAuthUser(c));
+  const user = getAuthUser(c);
+
+  // If user already has a wallet (BYO or CDP), just read balance
+  if (user.walletAddress) {
+    const balanceUsdc = await getWalletBalance(user.walletAddress);
+    return c.json({
+      address: user.walletAddress,
+      balanceUsdc,
+      network: "base-sepolia",
+    });
+  }
+
+  // No wallet yet — try CDP as lazy fallback
+  const result = await ensureWallet(user);
 
   if (!result.walletAddress) {
     return c.json({
       address: null,
       balanceUsdc: 0,
       network: "base-sepolia",
-      error: (result as any).walletError || "Wallet not yet created",
-    }, 503);
+      message: "No wallet connected. Use the Connect Wallet button to link your wallet.",
+    });
   }
 
   const balanceUsdc = await getWalletBalance(result.walletAddress);
-
   return c.json({
     address: result.walletAddress,
     balanceUsdc,

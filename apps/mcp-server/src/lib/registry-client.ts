@@ -161,6 +161,32 @@ export class RegistryClient {
     return res.json() as Promise<{ services: ServiceResponse[]; count: number }>;
   }
 
+  async register(email: string, password: string, displayName?: string) {
+    const res = await fetch(`${this.apiUrl}/api/auth/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password, displayName }),
+    });
+    if (!res.ok) {
+      const error = await res.text();
+      throw new Error(`Registration failed (${res.status}): ${error}`);
+    }
+    return res.json() as Promise<{ user: { id: string; email: string; walletAddress: string | null }; apiKey: string; message: string }>;
+  }
+
+  async login(email: string, password: string) {
+    const res = await fetch(`${this.apiUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    if (!res.ok) {
+      const error = await res.text();
+      throw new Error(`Login failed (${res.status}): ${error}`);
+    }
+    return res.json() as Promise<{ token: string; user: { id: string; email: string; walletAddress: string | null } }>;
+  }
+
   getCallUrl(serviceId: string) {
     return `${this.apiUrl}/v1/call/${serviceId}`;
   }
